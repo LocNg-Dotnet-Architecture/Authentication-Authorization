@@ -1,0 +1,6 @@
+@SsoEntraId.Bff_HostAddress = http://localhost:5045
+
+GET {{SsoEntraId.Bff_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

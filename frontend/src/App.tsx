@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from './auth/useAuth'
+import { SignUpForm } from './components/SignUpForm'
 
 // Trang Access Denied - hiển thị khi user không thuộc group được phép
 function AccessDeniedPage() {
@@ -24,6 +25,7 @@ function App() {
   const { user, isLoading, isAuthenticated } = useAuth()
   const [weatherData, setWeatherData] = useState<unknown[] | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
+  const [showSignUp, setShowSignUp] = useState(false)
 
   const handleLogin = () => {
     window.location.href = '/auth/login?returnUrl=/'
@@ -74,12 +76,21 @@ function App() {
     <div style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
       <h1>SSO with Entra ID (BFF Pattern)</h1>
 
-      {!isAuthenticated ? (
+      {!isAuthenticated && !showSignUp && (
         <div>
           <p>You are not logged in.</p>
-          <button onClick={handleLogin}>Login with Microsoft</button>
+          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <button onClick={handleLogin}>Login</button>
+            <button onClick={() => setShowSignUp(true)}>Sign up</button>
+          </div>
         </div>
-      ) : (
+      )}
+
+      {!isAuthenticated && showSignUp && (
+        <SignUpForm onCancel={() => setShowSignUp(false)} />
+      )}
+
+      {isAuthenticated && (
         <div>
           <p>
             Logged in as: <strong>{user?.name}</strong> ({user?.email})

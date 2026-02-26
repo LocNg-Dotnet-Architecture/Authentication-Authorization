@@ -1,11 +1,17 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.Identity.Web;
+using SsoEntraId.Bff.NativeAuth;
 using System.Net.Http.Headers;
 using Yarp.ReverseProxy.Transforms;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// OIDC correlation/nonce cookies tích lũy qua nhiều lần login có thể vượt 32KB default.
+builder.WebHost.ConfigureKestrel(o =>
+    o.Limits.MaxRequestHeadersTotalSize = 65_536); // 64 KB
 
 var apiScopes = new[] { builder.Configuration["ApiScopes"] ?? "api://YOUR_API_CLIENT_ID/.default" };
 
@@ -21,29 +27,6 @@ builder.Services
         {
             builder.Configuration.Bind("AzureAd", microsoftIdentityOptions);
             microsoftIdentityOptions.ResponseType = "code";
-
-            // Kiểm tra group membership ngay sau khi Entra ID xác thực thành công
-            // Chạy TRƯỚC khi cookie session được set → user không được group sẽ không có session
-            microsoftIdentityOptions.Events.OnTokenValidated = ctx =>
-            {
-                var config = ctx.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
-                var requiredGroupId = config["RequiredGroupId"];
-
-                if (string.IsNullOrEmpty(requiredGroupId))
-                    return Task.CompletedTask;
-
-                var inGroup = ctx.Principal?.Claims
-                    .Any(c => c.Type == "groups" && c.Value == requiredGroupId) ?? false;
-
-                if (!inGroup)
-                {
-                    var frontendUrl = config["FrontendUrl"] ?? "http://localhost:5173";
-                    ctx.Response.Redirect(frontendUrl + "/access-denied");
-                    ctx.HandleResponse(); // Dừng OIDC flow, không set cookie
-                }
-
-                return Task.CompletedTask;
-            };
         },
         cookieOptions =>
         {
@@ -67,6 +50,48 @@ builder.Services
     .EnableTokenAcquisitionToCallDownstreamApi(apiScopes)
     .AddInMemoryTokenCaches();
 
+// Đăng ký SAU AddMicrosoftIdentityWebApp để handler chạy sau IPostConfigureOptions
+// của MSIW (theo registration order). Nhờ vậy previousHandler capture đúng handler
+// cuối của MSIW, đảm bảo prompt=create và screen_hint=signup được forward lên Entra.
+builder.Services.PostConfigure<OpenIdConnectOptions>(
+    OpenIdConnectDefaults.AuthenticationScheme,
+    options =>
+    {
+        // Giới hạn thời gian sống của correlation/nonce cookies để tránh tích lũy
+        options.CorrelationCookie.MaxAge = TimeSpan.FromMinutes(15);
+        options.NonceCookie.MaxAge       = TimeSpan.FromMinutes(15);
+
+        var previousHandler = options.Events.OnRedirectToIdentityProvider;
+        options.Events.OnRedirectToIdentityProvider = async ctx =>
+        {
+            // Với fetch/XHR requests (vd: /auth/me khi chưa đăng nhập), trả về 401
+            // thay vì redirect 302 ra Entra — tránh CORS error trên browser.
+            var accept = ctx.Request.Headers.Accept.ToString();
+            var isApiRequest = accept.Contains("application/json")
+                || ctx.Request.Headers.XRequestedWith == "XMLHttpRequest";
+            if (isApiRequest)
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                ctx.HandleResponse();
+                return;
+            }
+
+            if (previousHandler is not null)
+                await previousHandler(ctx);
+
+            if (ctx.Properties.Items.TryGetValue("prompt", out var prompt)
+                && !string.IsNullOrEmpty(prompt))
+            {
+                ctx.ProtocolMessage.Prompt = prompt;
+            }
+            if (ctx.Properties.Items.TryGetValue("screen_hint", out var screenHint)
+                && !string.IsNullOrEmpty(screenHint))
+            {
+                ctx.ProtocolMessage.SetParameter("screen_hint", screenHint);
+            }
+        };
+    });
+
 // CORS for frontend dev server
 builder.Services.AddCors(options =>
 {
@@ -81,6 +106,15 @@ builder.Services.AddCors(options =>
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+
+// Native Authentication typed HttpClient
+// Base URL: {instance}/{tenantDomain}/ — paths dùng signup/v1.0/* và oauth2/v2.0/token
+var entraBase = $"{builder.Configuration["AzureAd:Instance"]!.TrimEnd('/')}/{builder.Configuration["Entra:TenantDomain"]}/";
+builder.Services.AddHttpClient<EntraNativeAuthService>(c =>
+{
+    c.BaseAddress = new Uri(entraBase);
+    c.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+});
 
 builder.Services.AddAntiforgery(options =>
 {
@@ -99,6 +133,8 @@ builder.Services.AddReverseProxy()
             var tokenAcquisition = transformContext.HttpContext
                 .RequestServices
                 .GetRequiredService<ITokenAcquisition>();
+
+            string? token = null;
             try
             {
                 var scopes = transformContext.HttpContext
@@ -106,14 +142,19 @@ builder.Services.AddReverseProxy()
                     .GetRequiredService<IConfiguration>()["ApiScopes"]
                     ?? "api://YOUR_API_CLIENT_ID/.default";
 
-                var token = await tokenAcquisition.GetAccessTokenForUserAsync(
-                    new[] { scopes });
-                transformContext.ProxyRequest!.Headers.Authorization =
-                    new AuthenticationHeaderValue("Bearer", token);
+                token = await tokenAcquisition.GetAccessTokenForUserAsync(new[] { scopes });
             }
             catch
             {
-                // Token acquisition failed - API will return 401
+                // ITokenAcquisition failed (vd: session từ native auth không có MSAL cache).
+                // Fallback: đọc access_token được lưu trong cookie auth properties bởi SignInAsync.
+                token = await transformContext.HttpContext.GetTokenAsync("access_token");
+            }
+
+            if (!string.IsNullOrEmpty(token))
+            {
+                transformContext.ProxyRequest!.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", token);
             }
         });
     });

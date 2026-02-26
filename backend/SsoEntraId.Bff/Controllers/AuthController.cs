@@ -41,6 +41,18 @@ public class AuthController(IConfiguration configuration, IAntiforgery antiforge
     {
         await antiforgery.ValidateRequestAsync(HttpContext);
 
+        // Native auth session không có Entra browser session nên không cần OIDC signout
+        // (sẽ hiện màn hình account picker trống nếu gọi OIDC signout)
+        var authResult = await HttpContext.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+        var isNativeAuth = authResult.Properties?.Items.TryGetValue("auth_type", out var authType) == true
+                           && authType == "native";
+
+        if (isNativeAuth)
+        {
+            await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return Redirect(FrontendUrl + "/");
+        }
+
         return SignOut(
             new AuthenticationProperties { RedirectUri = FrontendUrl + "/" },
             CookieAuthenticationDefaults.AuthenticationScheme,

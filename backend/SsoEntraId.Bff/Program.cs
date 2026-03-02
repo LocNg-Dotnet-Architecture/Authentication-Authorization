@@ -89,6 +89,11 @@ builder.Services.PostConfigure<OpenIdConnectOptions>(
             {
                 ctx.ProtocolMessage.SetParameter("screen_hint", screenHint);
             }
+            if (ctx.Properties.Items.TryGetValue("domain_hint", out var domainHint)
+                && !string.IsNullOrEmpty(domainHint))
+            {
+                ctx.ProtocolMessage.DomainHint = domainHint;
+            }
         };
     });
 

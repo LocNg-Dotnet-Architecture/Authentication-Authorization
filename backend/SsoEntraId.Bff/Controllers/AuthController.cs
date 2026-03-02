@@ -22,7 +22,7 @@ public class AuthController(IConfiguration configuration, IAntiforgery antiforge
     }
 
     [HttpGet("login")]
-    public IActionResult Login(string? returnUrl = "/")
+    public IActionResult Login(string? returnUrl = "/", string? provider = null)
     {
         var safeReturn = IsValidReturnUrl(returnUrl) ? returnUrl : "/";
         var redirectUri = FrontendUrl + safeReturn;
@@ -30,9 +30,21 @@ public class AuthController(IConfiguration configuration, IAntiforgery antiforge
         if (User.Identity?.IsAuthenticated == true)
             return Redirect(redirectUri);
 
-        return Challenge(
-            new AuthenticationProperties { RedirectUri = redirectUri },
-            OpenIdConnectDefaults.AuthenticationScheme);
+        var props = new AuthenticationProperties { RedirectUri = redirectUri };
+
+        if (!string.IsNullOrEmpty(provider))
+        {
+            // Skip Entra's identity provider selection screen and go directly to the provider.
+            props.Items["domain_hint"] = provider;
+        }
+        else
+        {
+            // Always show a fresh login screen — prevents Entra from auto-selecting
+            // a cached account (which may have been deleted or belong to wrong provider).
+            props.Items["prompt"] = "select_account";
+        }
+
+        return Challenge(props, OpenIdConnectDefaults.AuthenticationScheme);
     }
 
     [HttpPost("logout")]
@@ -63,6 +75,10 @@ public class AuthController(IConfiguration configuration, IAntiforgery antiforge
     [Authorize]
     public IActionResult Me()
     {
+        // "idp" claim is set by Entra External ID when user signs in via a federated provider.
+        // Value is e.g. "google.com" for Google, absent/null for local email+password accounts.
+        var idp = User.FindFirst("idp")?.Value;
+
         return Ok(new
         {
             Name = User.Identity?.Name,
@@ -70,7 +86,8 @@ public class AuthController(IConfiguration configuration, IAntiforgery antiforge
                     ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value,
             Roles = User.Claims
                 .Where(c => c.Type == "roles" || c.Type == System.Security.Claims.ClaimTypes.Role)
-                .Select(c => c.Value)
+                .Select(c => c.Value),
+            IdentityProvider = idp ?? "local",
         });
     }
 }

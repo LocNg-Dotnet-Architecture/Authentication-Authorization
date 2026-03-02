@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAuth } from './auth/useAuth'
+import { useAuth, getLastIdentityProvider } from './auth/useAuth'
 import { SignUpForm } from './components/SignUpForm'
 
 // Trang Access Denied - hiển thị khi user không thuộc group được phép
@@ -29,6 +29,10 @@ function App() {
 
   const handleLogin = () => {
     window.location.href = '/auth/login?returnUrl=/'
+  }
+
+  const handleGoogleLogin = () => {
+    window.location.href = '/auth/login?returnUrl=/&provider=google.com'
   }
 
   const getCsrfToken = () =>
@@ -80,7 +84,20 @@ function App() {
         <div>
           <p>You are not logged in.</p>
           <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-            <button onClick={handleLogin}>Login</button>
+            {/* Show "Continue with Google" prominently if user previously used Google */}
+            {getLastIdentityProvider() === 'google.com' ? (
+              <>
+                <button onClick={handleGoogleLogin}>Continue with Google</button>
+                <button onClick={handleLogin} style={{ fontSize: '0.85rem', background: 'none', border: '1px solid #999' }}>
+                  Use another account
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={handleLogin}>Login</button>
+                <button onClick={handleGoogleLogin}>Login with Google</button>
+              </>
+            )}
             <button onClick={() => setShowSignUp(true)}>Sign up</button>
           </div>
         </div>

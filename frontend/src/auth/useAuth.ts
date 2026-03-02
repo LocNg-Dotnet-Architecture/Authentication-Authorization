@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 interface User {
   name: string
   email: string
+  identityProvider: string  // "google.com" | "local"
 }
 
 interface AuthState {
@@ -10,6 +11,8 @@ interface AuthState {
   isLoading: boolean
   isAuthenticated: boolean
 }
+
+const STORAGE_KEY = 'last_identity_provider'
 
 export function useAuth(): AuthState {
   const [state, setState] = useState<AuthState>({
@@ -25,6 +28,8 @@ export function useAuth(): AuthState {
         throw new Error('Not authenticated')
       })
       .then((user: User) => {
+        // Persist provider so we can show the right login button after logout
+        localStorage.setItem(STORAGE_KEY, user.identityProvider)
         setState({ user, isLoading: false, isAuthenticated: true })
       })
       .catch(() => {
@@ -33,4 +38,8 @@ export function useAuth(): AuthState {
   }, [])
 
   return state
+}
+
+export function getLastIdentityProvider(): string {
+  return localStorage.getItem(STORAGE_KEY) ?? 'local'
 }

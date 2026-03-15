@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from './auth/useAuth'
 import { SignUpForm } from './components/SignUpForm'
+import { ChangePasswordForm } from './components/ChangePasswordForm'
 
 // Trang Access Denied - hiển thị khi user không thuộc group được phép
 function AccessDeniedPage() {
@@ -26,6 +27,7 @@ function App() {
   const [weatherData, setWeatherData] = useState<unknown[] | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [showSignUp, setShowSignUp] = useState(false)
+  const [showChangePassword, setShowChangePassword] = useState(false)
 
   const handleLogin = () => {
     window.location.href = '/auth/login?returnUrl=/'
@@ -90,12 +92,18 @@ function App() {
         <SignUpForm onCancel={() => setShowSignUp(false)} />
       )}
 
-      {isAuthenticated && (
+      {isAuthenticated && !showChangePassword && (
         <div>
           <p>
             Logged in as: <strong>{user?.name}</strong> ({user?.email})
           </p>
-          <button onClick={handleLogout}>Logout</button>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button onClick={handleLogout}>Logout</button>
+            <button onClick={() => setShowChangePassword(true)}
+              style={{ background: 'none', border: '1px solid #999' }}>
+              Đổi mật khẩu
+            </button>
+          </div>
 
           <hr />
 
@@ -106,6 +114,14 @@ function App() {
             <pre>{JSON.stringify(weatherData, null, 2)}</pre>
           )}
         </div>
+      )}
+
+      {isAuthenticated && showChangePassword && (
+        <ChangePasswordForm
+          initialEmail={user?.email}
+          onCancel={() => setShowChangePassword(false)}
+          onDone={() => setShowChangePassword(false)}
+        />
       )}
     </div>
   )

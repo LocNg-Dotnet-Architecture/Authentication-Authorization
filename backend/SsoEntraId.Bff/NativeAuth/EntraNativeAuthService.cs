@@ -72,6 +72,50 @@ public sealed class EntraNativeAuthService(HttpClient httpClient, IConfiguration
             ["oob"]                = otp
         }, ct);
 
+    // ── Reset Password (SSPR) ─────────────────────────────────────────────────
+
+    public Task<NativeAuthStepResult> StartResetPasswordAsync(string email, CancellationToken ct = default)
+        => PostStepAsync("resetpassword/v1.0/start", new()
+        {
+            ["client_id"]      = ClientId,
+            ["challenge_type"] = "oob redirect",
+            ["username"]       = email
+        }, ct);
+
+    public Task<NativeAuthStepResult> RequestResetOtpChallengeAsync(string continuationToken, CancellationToken ct = default)
+        => PostStepAsync("resetpassword/v1.0/challenge", new()
+        {
+            ["client_id"]          = ClientId,
+            ["challenge_type"]     = "oob redirect",
+            ["continuation_token"] = continuationToken
+        }, ct);
+
+    public Task<NativeAuthStepResult> SubmitResetOtpAsync(string continuationToken, string otp, CancellationToken ct = default)
+        => PostStepAsync("resetpassword/v1.0/continue", new()
+        {
+            ["client_id"]          = ClientId,
+            ["continuation_token"] = continuationToken,
+            ["grant_type"]         = "oob",
+            ["oob"]                = otp
+        }, ct);
+
+    public Task<NativeAuthStepResult> SubmitNewPasswordAsync(string continuationToken, string newPassword, CancellationToken ct = default)
+        => PostStepAsync("resetpassword/v1.0/submit", new()
+        {
+            ["client_id"]          = ClientId,
+            ["continuation_token"] = continuationToken,
+            ["new_password"]       = newPassword
+        }, ct);
+
+    public Task<NativeAuthStepResult> PollResetCompletionAsync(string continuationToken, CancellationToken ct = default)
+        => PostStepAsync("resetpassword/v1.0/poll_completion", new()
+        {
+            ["client_id"]          = ClientId,
+            ["continuation_token"] = continuationToken
+        }, ct);
+
+    // ── Sign Up ───────────────────────────────────────────────────────────────
+
     public Task<NativeAuthStepResult> SubmitPasswordAsync(string continuationToken, string password, CancellationToken ct = default)
         => PostStepAsync("signup/v1.0/continue", new()
         {

@@ -79,6 +79,13 @@ builder.Services.PostConfigure<OpenIdConnectOptions>(
             if (previousHandler is not null)
                 await previousHandler(ctx);
 
+            // Override redirect_uri để dùng FrontendUrl (qua Vite proxy)
+            // thay vì host của BFF (https://localhost:5001)
+            var frontendUrl = builder.Configuration["FrontendUrl"]?.TrimEnd('/');
+            var callbackPath = builder.Configuration["AzureAd:CallbackPath"] ?? "/api/signin-oidc";
+            if (!string.IsNullOrEmpty(frontendUrl))
+                ctx.ProtocolMessage.RedirectUri = $"{frontendUrl}{callbackPath}";
+
             if (ctx.Properties.Items.TryGetValue("prompt", out var prompt)
                 && !string.IsNullOrEmpty(prompt))
             {
@@ -168,6 +175,21 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("FrontendDev");
+
+// Rewrite host/scheme cho OIDC callback để MSAL tính redirect_uri đúng
+// (BFF chạy https://localhost:5001 nhưng OIDC callback đi qua Vite proxy http://localhost:5173)
+app.Use(async (context, next) =>
+{
+    var callbackPath = builder.Configuration["AzureAd:CallbackPath"] ?? "/api/signin-oidc";
+    if (context.Request.Path.StartsWithSegments(callbackPath))
+    {
+        var frontendUri = new Uri(builder.Configuration["FrontendUrl"] ?? "http://localhost:5173");
+        context.Request.Scheme = frontendUri.Scheme;
+        context.Request.Host = new HostString(frontendUri.Host, frontendUri.Port);
+    }
+    await next();
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 
